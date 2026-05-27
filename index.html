@@ -137,6 +137,15 @@ body{overflow:hidden}
 .chat-send svg{width:18px;height:18px;stroke:#000;fill:none;stroke-width:2.5;stroke-linecap:round}
 .chat-send:disabled{background:var(--s3);cursor:not-allowed}
 .chat-send:disabled svg{stroke:var(--t3)}
+.key-setup{background:var(--s2);border:1px solid var(--b2);border-radius:var(--rads);padding:12px;margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.key-setup p{font-size:12px;color:var(--t2);line-height:1.5}
+.key-setup a{color:var(--g);text-decoration:none}
+.key-row{display:flex;gap:8px}
+.key-input{flex:1;height:38px;background:var(--s3);border:1px solid var(--b2);border-radius:var(--radxs);color:var(--t);font-size:13px;padding:0 10px;font-family:var(--font)}
+.key-input:focus{outline:none;border-color:var(--g)}
+.key-save{padding:0 14px;height:38px;background:var(--g);border:none;border-radius:var(--radxs);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);white-space:nowrap}
+.key-saved{font-size:12px;color:var(--g);display:flex;align-items:center;justify-content:space-between}
+.key-clear{font-size:11px;color:var(--t3);background:none;border:none;cursor:pointer;font-family:var(--font);text-decoration:underline}
 .quick-chips{display:flex;gap:6px;padding:0 14px 10px;overflow-x:auto;flex-shrink:0}
 .qchip{flex-shrink:0;padding:7px 12px;border-radius:99px;background:var(--s2);border:1px solid var(--b2);font-size:12px;color:var(--t2);cursor:pointer;white-space:nowrap;font-family:var(--font)}
 .qchip:active{background:var(--s3)}
@@ -192,6 +201,7 @@ body{overflow:hidden}
       <div class="chat-header">
         <h2>AI Coach</h2>
         <p>Ask anything about your training</p>
+        <div id="keySetupArea"></div>
       </div>
       <div class="quick-chips" id="quickChips"></div>
       <div class="chat-messages" id="chatMessages"></div>
@@ -545,16 +555,63 @@ function renderHistory(){
 
 // ── AI COACH ──────────────────────────────────────────────────────────────────
 var aiInited=false;
+function getApiKey(){return localStorage.getItem("olt_apikey")||""}
+function saveApiKey(k){localStorage.setItem("olt_apikey",k.trim())}
+function clearApiKey(){localStorage.removeItem("olt_apikey")}
+
+function renderKeySetup(){
+  var area=document.getElementById("keySetupArea");
+  area.innerHTML="";
+  var key=getApiKey();
+  if(key){
+    var saved=document.createElement("div");saved.className="key-saved";
+    var lbl=document.createElement("span");lbl.textContent="✓ API key saved on this device";
+    var clr=document.createElement("button");clr.className="key-clear";clr.textContent="Remove";
+    clr.addEventListener("click",function(){
+      clearApiKey();
+      document.getElementById("chatMessages").innerHTML="";
+      aiInited=false;
+      renderKeySetup();
+      initAI();
+    });
+    saved.appendChild(lbl);saved.appendChild(clr);area.appendChild(saved);
+  } else {
+    var box=document.createElement("div");box.className="key-setup";
+    var desc=document.createElement("p");
+    desc.innerHTML='Enter your <a href="https://console.anthropic.com" target="_blank">Anthropic API key</a> — stored only on your device, never in the code.';
+    var row=document.createElement("div");row.className="key-row";
+    var inp=document.createElement("input");inp.className="key-input";inp.id="keyInput";inp.type="password";inp.placeholder="sk-ant-...";
+    var btn=document.createElement("button");btn.className="key-save";btn.textContent="Save";
+    btn.addEventListener("click",function(){
+      var k=inp.value.trim();
+      if(!k)return;
+      saveApiKey(k);
+      document.getElementById("chatMessages").innerHTML="";
+      aiInited=false;
+      renderKeySetup();
+      initAI();
+    });
+    row.appendChild(inp);row.appendChild(btn);
+    box.appendChild(desc);box.appendChild(row);area.appendChild(box);
+  }
+}
+
 function initAI(){
+  renderKeySetup();
   if(aiInited)return;aiInited=true;
-  var chips=document.getElementById("quickChips");
+  var chips=document.getElementById("quickChips");chips.innerHTML="";
   var qs=["Analyze my progress","What should I increase?","Suggest exercise variations","How am I progressing on squats?","Am I overtraining?","Give me a weekly summary"];
   qs.forEach(function(q){
     var c=document.createElement("button");c.className="qchip";c.textContent=q;
     c.addEventListener("click",function(){sendAI(q)});
     chips.appendChild(c);
   });
-  addMsg("ai","Hey! I'm your AI coach. I have access to all your workout history. Ask me anything about your training, progress, or for suggestions on what to improve. 💪");
+  var key=getApiKey();
+  if(key){
+    addMsg("ai","Hey! I'm your AI coach. I have access to all your workout history. Ask me anything about your training, progress, or for suggestions on what to improve. 💪");
+  } else {
+    addMsg("ai","Add your Anthropic API key above to get started. Your key is stored only on this device.");
+  }
   document.getElementById("chatSend").addEventListener("click",function(){
     var v=document.getElementById("chatInput").value.trim();if(v)sendAI(v);
   });
@@ -606,9 +663,11 @@ function sendAI(text){
   var systemPrompt="You are a knowledgeable, encouraging personal trainer and strength coach. You have full access to the user's workout history shown below. Give specific, data-driven advice. When suggesting progressive overload, reference their actual numbers. Keep responses concise but actionable (2-4 short paragraphs max). Use the data to make personalized recommendations.\n\n"+workoutCtx;
   var messages=chatHistory.slice(-10);
 
+  var apiKey=getApiKey();
+  if(!apiKey){addMsg("ai","Please add your API key above first.");document.getElementById("chatSend").disabled=false;return;}
   fetch("https://api.anthropic.com/v1/messages",{
     method:"POST",
-    headers:{"Content-Type":"application/json"},
+    headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
     body:JSON.stringify({
       model:"claude-sonnet-4-20250514",
       max_tokens:1000,
